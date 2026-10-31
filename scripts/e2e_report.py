@@ -26,7 +26,9 @@ def cfg(r):
             + (f" · {r['optim_label']}" if r.get("optim_label") and r["optim_label"] != "adamw" else ""))
 
 
-L = ["# 추천 설정으로 실제 학습 (gfarm A100 MIG 3g.40gb)\n",
+_gpu = next((r.get("gpu_name") for rr in by.values() for r in rr.values() if r.get("gpu_name")), "") or "GPU"
+_ng = max((int(r.get("gpus") or 1) for rr in by.values() for r in rr.values()), default=1)
+L = [f"# 추천 설정으로 실제 학습 ({_gpu}{f' · 최대 {_ng}장' if _ng > 1 else ''})\n",
      "도구가 만든 학습 스크립트 그대로, 실제 데이터(alpaca, 길이 맞춰 이어붙임) · 짧은 학습(앞 3스텝은 속도 측정 제외)\n"]
 n_sc = naive_oom = rec_ok = rec_n = top1_fastest = 0
 order_ok = order_n = 0

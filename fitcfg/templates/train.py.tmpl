@@ -230,7 +230,7 @@ def main():
                       data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
                       callbacks=[MeasureCallback()])
     trainer.train()
-    if CONFIG["save_model"]:
+    if CONFIG["save_model"] and (MAX_STEPS < 0 or os.environ.get("FITCFG_SAVE") == "1"):   # 짧은 검증 실행은 저장 생략
         trainer.save_model(targs.output_dir)      # LoRA면 어댑터만 저장
         log(f"모델 저장: {targs.output_dir}")
 

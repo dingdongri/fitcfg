@@ -123,6 +123,10 @@ def launch_sh(rec: Recommendation) -> str:
     use_ds = ds_config(rec) is not None
     lines = ["#!/usr/bin/env bash", "# fitcfg가 생성한 실행 스크립트", "set -euo pipefail",
              'cd "$(dirname "$0")"', ""]
+    if cfg.gpus == 1:
+        # GPU가 여러 장 보이는 머신에서 GPU 1장 설정을 그냥 실행하면 HF Trainer가 nn.DataParallel로 모든 GPU를 쓴다
+        # (Kaggle T4×2 실측: 메모리 +50%, 속도 1/4) → 예측과 같은 'GPU 1장'으로 고정. 이미 지정했으면 그대로.
+        lines.append('export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"')
     if cfg.gpus == 1 and not use_ds:
         lines.append("python train.py \"$@\"")
     else:
