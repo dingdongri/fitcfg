@@ -22,6 +22,8 @@ class ModelSpec:
     intermediate: int      # MLP intermediate size (I)
     tied_embeddings: bool = False   # 입력 임베딩과 lm_head가 같은 행렬을 공유하는지
     attn_head_dim: int | None = None  # head 하나의 차원. None이면 hidden/heads (Qwen3·Gemma는 다름)
+    logit_softcap: bool = False       # 최종 logits softcapping (Gemma-2) → logits 메모리 추가
+    extra_norms: int = 0              # 층당 추가 정규화 수 (Gemma-2·3: post-attention·post-FFN norm 2개)
 
     @property
     def head_dim(self) -> int:
@@ -97,7 +99,7 @@ EVAL_MODELS: dict[str, ModelSpec] = {
     "gemma-2-2b": ModelSpec(       # head_dim 256 ≠ hidden/heads, logit softcapping
         name="unsloth/gemma-2-2b", n_params=2_614_341_888,
         n_layers=26, hidden=2304, n_heads=8, n_kv_heads=4, vocab=256_000, intermediate=9216,
-        tied_embeddings=True, attn_head_dim=256),
+        tied_embeddings=True, attn_head_dim=256, logit_softcap=True, extra_norms=2),
     # --- 2026-10-29 추가: QLoRA 일반화 규칙 검증용 (구조가 조금씩 다른 최신 계열) ---
     "qwen3-4b": ModelSpec(         # q·k 정규화(qk-norm), head_dim 128 ≠ hidden/heads(80)
         name="Qwen/Qwen3-4B-Base", n_params=4_022_468_096,
@@ -117,7 +119,7 @@ EVAL_MODELS: dict[str, ModelSpec] = {
     "gemma-3-1b": ModelSpec(
         name="unsloth/gemma-3-1b-pt", n_params=999_885_952,
         n_layers=26, hidden=1152, n_heads=4, n_kv_heads=1, vocab=262_144, intermediate=6912,
-        tied_embeddings=True, attn_head_dim=256),
+        tied_embeddings=True, attn_head_dim=256, extra_norms=2),
 }
 
 
@@ -133,3 +135,12 @@ def get_model(key: str) -> ModelSpec:
         from .autospec import resolve
         return resolve(key)[0]
     raise KeyError(f"unknown model '{key}'. available: {list(MODELS)} 또는 HF 이름(org/model)·config.json 경로")
+
+
+# 같은 가중치의 공개 사본·원본 이름 → 등록 키 (HF Trainer 플러그인이 모델 이름으로 찾을 때)
+ALIASES: dict[str, str] = {
+    "unsloth/meta-llama-3.1-8b": "llama-3.1-8b", "meta-llama/meta-llama-3.1-8b": "llama-3.1-8b",
+    "unsloth/llama-3.2-1b": "llama-3.2-1b", "unsloth/mistral-7b-v0.3": "mistral-7b-v0.3",
+    "mistralai/mistral-7b-v0.3": "mistral-7b-v0.3",
+    **{m.name.lower(): k for k, m in MODELS.items()},
+}

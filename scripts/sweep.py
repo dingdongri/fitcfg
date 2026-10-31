@@ -94,6 +94,17 @@ PRESETS: dict[str, list[dict]] = {
     # ⑥ QLoRA 일반화 규칙 검증 (2026-10-29): 처음 보는 4개 계열 × QLoRA·LoRA 같은 설정 → 'QLoRA 활성값 ≈ LoRA × k' 규칙 확인
     "mig-qlora-new": [d for m in ("smollm2-1.7b", "olmo2-1b", "granite-3.3-2b", "qwen3-4b")
                       for d in grid(m, "qlora", [1, 4], [1024, 2048]) + grid(m, "lora", [1, 4], [1024, 2048])],
+    # ⑤ 긴 시퀀스 (2026-10-31): 4096 이상 실측이 6개뿐 → 긴 문서 학습(가장 OOM이 잦은 구간) 확인
+    "mig-long": (
+        grid("llama-3.1-8b", "qlora", [1], [4096, 8192, 16384], ckpt=[True])
+        + grid("llama-3.1-8b", "qlora", [1], [4096, 8192], ckpt=[False])
+        + grid("llama-3.1-8b", "lora", [1], [4096, 8192, 16384], ckpt=[True])
+        + grid("qwen2.5-7b", "qlora", [1], [8192, 16384], ckpt=[True])
+        + grid("qwen2.5-3b", "qlora", [1, 2], [8192], ckpt=[True])
+        + grid("qwen2.5-3b", "lora", [1], [8192, 16384], ckpt=[True])
+        + grid("llama-3.2-1b", "lora", [1], [8192, 16384], ckpt=[True, False])
+        + grid("llama-3.2-1b", "full", [1], [8192], ckpt=[True])
+    ),
     # ④ 처음 보는 계열 실측 (보정에 안 씀 = 일반화 시험). FakeTensor 추적 결과(family_report)와도 대조
     "mig-family": [d for m in ("gemma-3-1b", "gemma-2-2b", "phi-3-mini", "mistral-7b-v0.3")
                    for d in grid(m, "qlora", [1, 4], [1024, 2048]) + grid(m, "lora", [1, 4], [1024, 2048])],

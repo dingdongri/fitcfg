@@ -8,7 +8,8 @@
     verified   : 직접 측정해 보정한 모델 (Llama·Qwen2.5·Mistral)            → 그대로 (오차 3~5%)
     llama-like : 디코더 + GQA + SwiGLU 계열 (Phi-3·Qwen3·OLMo-2·SmolLM2·Granite 등)
                  처음 보는 8개 계열 실측: 예측식 평균 4.4%, 안전계수로 놓친 OOM 0 → 그대로 + 안내
-    gemma-like : Gemma 계열 (head_dim 256, 큰 어휘, softcapping) — 예측식이 9~23% 적게 예측
+    gemma-like : Gemma 계열 (head_dim 256, 큰 어휘, 층당 norm 2개 추가, logits softcapping)
+                 구조 항(attention 폭·추가 norm·softcap, 2026-10-31) 반영 후 평균 1.5~7.7%지만 QLoRA 최대 −18%
                  → 예측 메모리에 여유(LoRA·Full ×1.15, QLoRA ×1.25) + CPU 직접 측정 권장
     moe        : 전문가 혼합(Mixtral·Qwen-MoE·DeepSeek-V2 등) → 지원 안 함 (메모리 구조가 다름)
     unknown    : 위에 없는 구조 → 여유(×1.10 / ×1.20) + CPU 직접 측정 권장
@@ -26,6 +27,8 @@ LLAMA_LIKE = {"llama", "mistral", "qwen2", "qwen3", "phi3", "olmo2", "olmo", "gr
               "deepseek", "internlm2", "internlm3", "exaone", "cohere", "starcoder2", "stablelm", "glm", "glm4",
               "ministral", "seed_oss", "hunyuan_v1_dense", "apertus"}
 GEMMA_LIKE = {"gemma", "gemma2", "gemma3", "gemma3_text"}
+# 층당 정규화가 2개 더 있는 구조 (pre-norm + post-norm 'sandwich'): 활성값이 그만큼 늘어난다
+EXTRA_NORMS = {"gemma2": 2, "gemma3": 2, "gemma3_text": 2}
 MOE_KEYS = ("num_local_experts", "num_experts", "n_routed_experts", "moe_intermediate_size", "num_experts_per_tok")
 
 MARGINS = {   # (LoRA·Full, QLoRA) — 예측 메모리에 곱함
@@ -98,11 +101,12 @@ def classify(cfg: dict, verified: bool = False) -> StructureInfo:
     if mt in GEMMA_LIKE:
         lo, q = MARGINS["gemma-like"]
         return StructureInfo("gemma-like", mt,
-                             "Gemma 계열은 예측식이 9~23% 적게 예측(실측) → 여유를 더 두었습니다. "
+                             "Gemma 계열은 구조 차이(추가 norm·softcap)를 반영해도 최대 18% 적게 예측될 수 있어(실측) "
+                             "여유를 더 두었습니다. "
                              "정확한 값은 `fitcfg measure-cpu`로 확인하세요.", lo, q)
     if mt in LLAMA_LIKE:
         return StructureInfo("llama-like", mt,
-                             "처음 보는 모델(Llama형 구조): 처음 보는 8개 계열 실측 기준 오차 2~6%, 안전 여유로 OOM 0건.")
+                             "처음 보는 모델(Llama형 구조): 처음 보는 계열 실측 평균 4%, 안전 여유로 놓친 OOM 0건.")
     lo, q = MARGINS["unknown"]
     return StructureInfo("unknown", mt or "?",
                          f"검증하지 않은 구조({mt or '알 수 없음'}) → 여유를 더 두었습니다. "
@@ -128,7 +132,9 @@ def spec_from_config(cfg: dict, name: str) -> ModelSpec:
     n = L * per_layer + V * H * (1 if tied else 2) + H
     return ModelSpec(name=name, n_params=int(n), n_layers=L, hidden=H, n_heads=nh, n_kv_heads=nkv,
                      vocab=V, intermediate=I, tied_embeddings=tied,
-                     attn_head_dim=hd if hd != H // nh else None)
+                     attn_head_dim=hd if hd != H // nh else None,
+                     logit_softcap=bool(c.get("final_logit_softcapping")),
+                     extra_norms=EXTRA_NORMS.get(str(c.get("model_type", "")).lower(), 0))
 
 
 def resolve(name: str, token: str | None = None) -> tuple[ModelSpec, StructureInfo]:

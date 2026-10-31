@@ -195,6 +195,8 @@ def _evaluate(req: PlanRequest, spec: ModelSpec, cfg: TrainConfig, strategy: str
     if cfg.method == "full" and strategy in ("single", "ddp") and req.gpu.bf16:
         rec.warnings.append("순수 bf16 학습(fp32 master 없음): 메모리는 적지만 아주 작은 lr에선 "
                             "업데이트가 묻힐 수 있음. 정밀도가 중요하면 ZeRO 전략(fp32 master) 선택")
+    if cfg.zero_stage >= 3:
+        rec.warnings.append("ZeRO-3는 할당기 단편화가 커서(실측 1건: 예약 메모리 = 할당의 1.76배) 여유를 크게 잡았습니다")
     if rec.fits and rec.headroom_gb < 0.05 * req.gpu.mem_gb:
         rec.warnings.append("메모리 여유가 5% 미만: 데이터에 긴 샘플이 섞이면 OOM 가능")
     return rec

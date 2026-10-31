@@ -125,6 +125,18 @@ def _zero_stage(args) -> int:
     return 0
 
 
+def _ckpt_on(model) -> bool:
+    """TrainingArguments 대신 model.gradient_checkpointing_enable()로 켠 경우도 잡는다."""
+    m = model
+    for _ in range(4):
+        if getattr(m, "is_gradient_checkpointing", False):
+            return True
+        m = getattr(m, "base_model", None) or getattr(m, "model", None)
+        if m is None:
+            break
+    return False
+
+
 def detect(model, args, seq_len: int | None = None) -> Detected:
     cfg = _model_config_dict(model)
     is_lora, r, tgt = _lora_info(model)
@@ -139,7 +151,7 @@ def detect(model, args, seq_len: int | None = None) -> Detected:
         batch_size=int(getattr(args, "per_device_train_batch_size", 8)),
         grad_accum=int(getattr(args, "gradient_accumulation_steps", 1)),
         seq_len=int(seq_len),
-        grad_checkpointing=bool(getattr(args, "gradient_checkpointing", False)),
+        grad_checkpointing=bool(getattr(args, "gradient_checkpointing", False)) or _ckpt_on(model),
         gpus=max(int(getattr(args, "world_size", 1) or 1), 1),
         zero_stage=_zero_stage(args),
         optim="adamw8bit" if any(k in optim.lower() for k in _8BIT_OPTIMS) else "adamw",
@@ -150,8 +162,10 @@ def detect(model, args, seq_len: int | None = None) -> Detected:
 
 
 def _spec_and_structure(cfg: dict, name: str) -> tuple[ModelSpec, object]:
-    for key, m in MODELS.items():                # 실측 보정한 모델이면 그 사양 그대로
-        if m.name.lower() == name.lower() or key == name.lower():
+    from ..models import ALIASES
+    key = ALIASES.get(name.lower().rstrip("/").split("/models--")[-1], name.lower())
+    for k, m in MODELS.items():                  # 실측 보정한 모델(또는 같은 가중치의 공개 사본)이면 그 사양 그대로
+        if m.name.lower() == name.lower() or k == key:
             return m, classify(cfg or {"model_type": "llama"}, verified=True)
     return spec_from_config(cfg, name), classify(cfg)
 

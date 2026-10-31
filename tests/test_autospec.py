@@ -11,7 +11,7 @@ QWEN3_4B = dict(model_type="qwen3", vocab_size=151936, hidden_size=2560, interme
                 tie_word_embeddings=True)
 GEMMA2_2B = dict(model_type="gemma2", vocab_size=256000, hidden_size=2304, intermediate_size=9216,
                  num_hidden_layers=26, num_attention_heads=8, num_key_value_heads=4, head_dim=256,
-                 tie_word_embeddings=True)
+                 tie_word_embeddings=True, final_logit_softcapping=30.0)
 LLAMA_8B = dict(model_type="llama", vocab_size=128256, hidden_size=4096, intermediate_size=14336,
                 num_hidden_layers=32, num_attention_heads=32, num_key_value_heads=8, tie_word_embeddings=False)
 QWEN25_7B = dict(model_type="qwen2", vocab_size=152064, hidden_size=3584, intermediate_size=18944,
@@ -93,3 +93,12 @@ def test_unknown_name_without_network_raises_keyerror(monkeypatch):
 def test_registered_config_is_reused_for_cpu_measurement():
     register("upload/my-model", QWEN3_4B)
     assert fetch_config("upload/my-model")["hidden_size"] == 2560     # 네트워크 없이 등록한 설계도 재사용
+
+
+def test_structure_terms_from_config():
+    g = spec_from_config(GEMMA2_2B, "g")
+    assert g.head_dim == 256 and g.q_dim == 2048 and g.logit_softcap and g.extra_norms == 2
+    q = spec_from_config(QWEN3_4B, "q")
+    assert q.q_dim == 4096 and not q.logit_softcap and q.extra_norms == 0
+    l = spec_from_config(LLAMA_8B, "l")
+    assert l.attn_head_dim is None and l.q_dim == l.hidden      # 보정 모델과 같은 구조 → 추가 항 0

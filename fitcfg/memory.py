@@ -80,6 +80,15 @@ class CostConstants:
     # FlashAttention이 없는 GPU(T4 등)에서 저장되는 attention 행렬 바이트 / (B·heads·S² 원소 1개).
     # Flash GPU에서는 기저가 0이라 영향 없음. Colab T4 실측으로 발견·보정 (2026-10-01)
     attn_sq_bytes: float = 2.0
+    # attention 폭(q_dim = heads × head_dim)이 hidden과 다른 모델(Qwen3-4B: 4096 vs 2560)의 추가 저장 활성값
+    # (bytes / 토큰·레이어·차이 1). 보정 모델은 q_dim = hidden이라 0 → 보정값에 영향 없음.
+    # FakeTensor 절제 실험(H 고정, head 수만 변경)으로 측정: 10.1 B (q 출력·RoPE·attention 출력 등 bf16 약 5개)
+    act_q: float = 10.0
+    # 최종 logits softcapping(Gemma-2: tanh(x/30)·30)이 추가로 저장하는 바이트 / (B·S·V 원소 1개)
+    softcap_bytes: float = 2.0
+    # 층마다 정규화가 2개 더 있는 구조(Gemma-2·3의 post-attention·post-FFN norm)가 저장하는 추가 활성값
+    # (bytes / 토큰·레이어·hidden·추가 norm 1개). 절제 실험: Gemma-2 층 = 같은 크기 Llama 층 + 8.0 B/H (norm 2개)
+    norm_bytes: float = 4.0
     # NF4 양자화 부가 메모리(파라미터당 바이트). double-quant 기준 ≈ 1/64 + 4/(64·256)
     nf4_extra: float = 0.016
     # QLoRA에서 양자화되지 않는 임베딩/lm_head의 파라미터당 바이트.
@@ -253,7 +262,10 @@ class Features:
     logit_basis: float            # B·S·V → × logit_bytes
     temp_basis: float             # GPU에서 optimizer step 하는 학습 파라미터 수 → × opt_temp
     ckpt: bool
-    attn_sq_basis: float = 0.0    # Flash 없는 GPU: (L 또는 1)·B·heads·S² → × attn_sq_bytes
+    attn_sq_basis: float = 0.0
+    act_q_basis: float = 0.0          # B·S·(활성 레이어)·(q_dim − hidden)
+    softcap_basis: float = 0.0        # B·S·V (logits softcapping 모델만)
+    norm_basis: float = 0.0           # B·S·(활성 레이어)·hidden·(추가 norm 수)    # Flash 없는 GPU: (L 또는 1)·B·heads·S² → × attn_sq_bytes
 
     @property
     def known(self) -> float:
@@ -264,7 +276,9 @@ class Features:
         return (self.known_weights + self.known_optimizer + self.known_persistent
                 + c.act_h * self.act_h_basis + c.act_i * self.act_i_basis
                 + c.ckpt_h * self.ckpt_basis + c.logit_bytes * self.logit_basis
-                + c.attn_sq_bytes * self.attn_sq_basis)
+                + c.attn_sq_bytes * self.attn_sq_basis
+                + c.act_q * self.act_q_basis + c.softcap_bytes * self.softcap_basis
+                + c.norm_bytes * self.norm_basis)
 
     def optim_step(self, c: "CostConstants") -> float:
         """역전파 직후 optimizer step 시점: grad 전체 + optimizer 임시 버퍼 (overhead 제외)."""
@@ -363,7 +377,16 @@ def features(cfg: TrainConfig, model: ModelSpec,
         ckpt=cfg.grad_checkpointing,
         attn_sq_basis=0.0 if cfg.flash_attn else
         float(n_act * cfg.batch_size * model.n_heads * cfg.seq_len ** 2),
+        act_q_basis=float(BS * n_act * (model.q_dim - H)),
+        softcap_basis=float(BS * model.vocab) if model.logit_softcap else 0.0,
+        norm_basis=float(BS * n_act * H * model.extra_norms),
     )
+
+
+# DeepSpeed ZeRO-3(파라미터를 층마다 모았다 버림)는 할당기 캐시가 크게 쪼개진다.
+# gfarm 실측(2026-10-31, Llama-3.2-1B Full · ZeRO-3 + 파라미터·optimizer offload): 할당 5.0GB인데 예약 8.8GB(×1.76).
+# 실측 1건이라 보수적으로 '할당 예측 × 0.75'를 오버헤드에 더한다 (예측 10.4GB vs 실측 9.4GB).
+ZERO3_FRAG = 0.75
 
 
 def estimate(cfg: TrainConfig, model: ModelSpec,
@@ -377,26 +400,32 @@ def estimate(cfg: TrainConfig, model: ModelSpec,
     f = features(cfg, model, c)
     fwd, step = f.fwd_bwd(c), f.optim_step(c)
     act = (c.act_h * f.act_h_basis + c.act_i * f.act_i_basis + c.ckpt_h * f.ckpt_basis
-           + c.attn_sq_bytes * f.attn_sq_basis)
-    common = dict(weights=f.known_weights, overhead=c.overhead_gb * GB)
+           + c.attn_sq_bytes * f.attn_sq_basis + c.act_q * f.act_q_basis + c.norm_bytes * f.norm_basis)
+    overhead = c.overhead_gb * GB
+    if cfg.zero_stage >= 3:
+        overhead += ZERO3_FRAG * max(fwd, step)
+    common = dict(weights=f.known_weights, overhead=overhead)
     if fwd >= step:
         return MemoryBreakdown(**common, gradients=f.known_persistent, optimizer=f.known_optimizer,
-                               activations=act, logits=c.logit_bytes * f.logit_basis,
-                               phase="fwd_bwd", other_phase_total=step + c.overhead_gb * GB)
+                               activations=act,
+                               logits=c.logit_bytes * f.logit_basis + c.softcap_bytes * f.softcap_basis,
+                               phase="fwd_bwd", other_phase_total=step + overhead)
     return MemoryBreakdown(**common, gradients=f.known_persistent + f.known_gradients,
                            optimizer=f.known_optimizer + c.opt_temp * f.temp_basis,
-                           phase="optim_step", other_phase_total=fwd + c.overhead_gb * GB)
+                           phase="optim_step", other_phase_total=fwd + overhead)
 
 
 def cpu_ram_needed_gb(cfg: TrainConfig, model: ModelSpec) -> float:
     """CPU offload 시 필요한 CPU RAM(노드 전체, GB). offload가 없으면 0.
     DeepSpeed CPU Adam: fp32 master(4) + m,v(8) + fp32/bf16 grad 버퍼(4) ≈ 16 bytes/param,
-    파라미터 offload 시 bf16 사본(2) 추가. pinned memory라 여유 20% 가정."""
+    파라미터 offload 시 bf16 사본(2) 추가, 모델을 CPU로 읽어 들이는 bf16 사본(2), 프로세스 고정분 4GB.
+    gfarm 실측(2026-10-31): Qwen2.5-3B ZeRO-2 offload가 컨테이너 CPU 한도 64GB를 넘어 강제 종료
+    (이전 식 55GB로 과소) → pinned memory·임시 버퍼 여유 25%로 올림 (새 식 74GB)."""
     if not (cfg.cpu_offload_optim or cfg.cpu_offload_params):
         return 0.0
     trainable = model.n_params if cfg.method == "full" else adapter_params(model, cfg)
-    b = trainable * 16.0 + (model.n_params * 2.0 if cfg.cpu_offload_params else 0.0)
-    return b * 1.2 / GB
+    b = trainable * 16.0 + (model.n_params * 2.0 if cfg.cpu_offload_params else 0.0) + model.n_params * 2.0
+    return b * 1.25 / GB + 4.0
 
 
 def fits(cfg: TrainConfig, model: ModelSpec, gpu_mem_gb: float,
