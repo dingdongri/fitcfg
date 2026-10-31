@@ -47,6 +47,11 @@ class ThroughputConstants:
     attn_nonflash: float = 1.0    # FlashAttention 없는 GPU의 attention 비용 배수
     opt_bpp: float = 0.0          # optimizer step: 학습 파라미터 1개당 메모리 이동 바이트 (AdamW)
     opt8_bpp: float = 0.0         # 〃 8bit AdamW
+    # --- GPU 여러 장 통신 (2026-10-31, Kaggle T4 ×2 실측) ---
+    # 실효 all-reduce 대역폭(GB/s). PCIe(P2P 없음) T4 ×2 Full ZeRO-2에서 4.9 GB/s로 맞음.
+    # NVLink GPU(A100·H100)는 문헌값 100. comm_model=False면 예전 방식(ddp_eff·zero3_eff 배수)
+    comm_gbs: float = 5.0
+    comm_gbs_nvlink: float = 100.0
 
     def eff(self, method: str) -> float:
         return {"full": self.eff_full, "lora": self.eff_lora, "qlora": self.eff_qlora}[method]
@@ -177,8 +182,17 @@ def estimate_throughput(cfg: TrainConfig, m: ModelSpec, gpu: GPUSpec,
 
     scale = 1.0
     if N > 1:
-        per_doubling = c.zero3_eff if cfg.zero_stage >= 3 else c.ddp_eff
-        scale = per_doubling ** math.log2(N)
+        # 통신 시간 = 보내는 바이트 ÷ 실효 대역폭 (계산과 겹침 없음으로 가정 — 실측이 그쪽에 맞음)
+        #   DDP·ZeRO-1: 학습 파라미터 기울기 all-reduce를 optimizer step마다 1번 (누적 중엔 no_sync)
+        #   ZeRO-2: 기울기 reduce를 마이크로스텝마다 / ZeRO-3: + 파라미터 all-gather(forward·backward)
+        # Kaggle T4 ×2 실측: LoRA·QLoRA는 기울기가 작아 GPU 1장 대비 정확히 2.0배, Full ZeRO-2는 통신이 1/3
+        ring = 2.0 * (N - 1) / N
+        gbs = c.comm_gbs_nvlink if gpu.key.startswith(("a100", "h100")) else c.comm_gbs
+        grad_bytes = trainable * 2.0 * ring
+        comm = grad_bytes * (grad_accum if cfg.zero_stage >= 2 else 1)
+        if cfg.zero_stage >= 3:
+            comm += grad_accum * 2.0 * m.n_params * 2.0 * (N - 1) / N
+        step_s += comm / (gbs * 1e9)
     tps = N * T * grad_accum / step_s * scale
     return ThroughputEstimate(tokens_per_s=tps, low=tps / c.band, high=tps * c.band,
                               step_time_s=step_s / scale, calibrated=is_calibrated(gpu.key))

@@ -349,6 +349,10 @@ def features(cfg: TrainConfig, model: ModelSpec,
     if cfg.zero_stage >= 1:
         o /= N
         trainable /= N               # optimizer step도 샤드만큼만
+    if cfg.zero_stage in (1, 2) and N > 1:
+        # DeepSpeed ZeRO-1/2는 갱신된 파라미터를 모으는 all-gather 버퍼(기본 allgather_bucket_size 5e8 원소, 16bit)를 잡는다.
+        # Kaggle T4 ×2 실측(Llama-3.2-1B Full ZeRO-2): 이 항 없이 −9%(13.05 vs 14.34GB) → 넣으면 −2.5%
+        persistent += min(5e8, P) * BYTES["bf16"]
     if cfg.zero_stage >= 2:
         g /= N
     # ZeRO-3에서 forward/backward 중 all-gather로 잠시 모이는 파라미터 (현재+prefetch ≈ 2개 레이어)

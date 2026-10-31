@@ -39,3 +39,21 @@ def test_long_sequence_and_structure_terms():
     g = EVAL_MODELS["gemma-2-2b"]
     cfg = TrainConfig(model="gemma-2-2b", method="qlora", batch_size=2, seq_len=2048, grad_checkpointing=False)
     assert abs(estimate(cfg, g).total / GB / 37.91 - 1) < 0.03
+
+
+def test_two_gpu_kaggle_measurements():
+    """Kaggle T4 ×2 실측(2026-10-31): Full ZeRO-2 메모리·속도, LoRA DDP는 GPU 1장 대비 2배."""
+    from fitcfg import get_gpu
+    from fitcfg.throughput import estimate_throughput
+    t4 = get_gpu("t4")
+    m1 = get_model("llama-3.2-1b")
+    z2 = TrainConfig(model="llama-3.2-1b", method="full", gpus=2, batch_size=1, seq_len=1024,
+                     grad_checkpointing=True, zero_stage=2, dtype="fp16", flash_attn=False)
+    assert abs(estimate(z2, m1).total / GB / 14.34 - 1) < 0.05
+    assert abs(estimate_throughput(z2, m1, t4, 8).tokens_per_s / 1354 - 1) < 0.1
+    q = get_model("qwen2.5-3b")
+    one = TrainConfig(model="qwen2.5-3b", method="qlora", gpus=1, batch_size=1, seq_len=2048,
+                      grad_checkpointing=True, dtype="fp16", flash_attn=False)
+    two = TrainConfig(**{**one.__dict__, "gpus": 2})
+    r = estimate_throughput(two, q, t4, 8).tokens_per_s / estimate_throughput(one, q, t4, 16).tokens_per_s
+    assert 1.9 < r <= 2.0                     # 실측 799.6 / 399.8 = 2.00

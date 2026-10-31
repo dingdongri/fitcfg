@@ -12,6 +12,7 @@ GPU가 여러 장이면 모델을 GPU에 나눠 올리는 3D 병렬화(TP·PP)�
 | 처음 보는 모델 7종 (설계도만으로 예측) | 평균 4% · 안전계수 적용 시 놓친 OOM 0 |
 | HF Trainer 플러그인을 실제 8B·7B·1B에 붙여서 | 학습 방식 자동 감지 7/7 · 메모리 1.6~2.9% · OOM 설정은 학습 전 7초 만에 중단 |
 | 긴 시퀀스 4K~16K (보정에 안 씀) | 메모리 2.1% · OOM 판정 18/18 · 처리량 3.3% |
+| GPU 2장 (Kaggle T4 ×2: DDP·ZeRO-2·ZeRO-3) | 추천 7/7 성공 · 기본값 3/3 OOM · LoRA·QLoRA 2장 = 1장의 2.0배 · 메모리 DDP 3.6~4.6% |
 | GPU 없이 CPU로 직접 측정 (처음 보는 구조 8개 계열) | LoRA·Full 1~2% |
 | 처리량 예측 (모델 빼고 맞추기 / 실제 학습 번들) | 3.9% / 4.0% (최대 7%) |
 
@@ -104,6 +105,7 @@ fitcfg/
 - `mig_report.md` — A100 MIG 실측 140개로 보정. held-out 4.9%, 안전계수 0.895로 놓친 OOM 0
 - `round4_report.md` — 추천대로 실제 학습(17/17 성공), 처음 보는 모델 4종, QLoRA 규칙 "LoRA × 1.3"
 - `round5_report.md` — 플러그인 실제 GPU · CPU offload · 긴 시퀀스 · 처음 보는 구조 식 보완
+- `multi_gpu_report.md` — GPU 2장 실측(Kaggle T4 ×2): 통신 시간 식, GPU 1장 설정의 DataParallel 버그 수정
 - `throughput_report.md` — 처리량 식 v2 (크기 효율·재계산 비용·optimizer 시간): A100 MIG 오차 12.6% → 3.9%
 - `e2e_report.md` — 시나리오별 기본값 vs 추천 1~3위 실측
 - `sim_3d_report_recal.md` — 하드웨어 5종 × 모델 2종 × 방법 3종의 3D 병렬화 판단 표
@@ -115,7 +117,7 @@ fitcfg/
 - Gemma 계열은 구조 항(추가 norm·softcap) 반영 후에도 QLoRA에서 최대 18% 적게 나올 수 있어 여유 ×1.15~1.25 유지
   (실측상 놓친 OOM 0, 대신 다소 보수적).
 - CPU offload·ZeRO-3는 실측 1~2건 — ZeRO-3 할당기 단편화(예약 = 할당 × 1.76)와 CPU RAM 식은 그 결과로 보수적으로 잡음.
-- GPU 2장 이상(DDP·FSDP·ZeRO)은 GPU 1장 기준 측정 + 문헌값 → `notebooks/kaggle_t4x2.ipynb`(무료 T4 ×2)로 실측 예정.
+- GPU 여러 장은 Kaggle T4 ×2(PCIe) 1종만 실측 — 통신 대역폭 4.9 GB/s는 이 결과로 정함. NVLink·3D 병렬화(TP·PP)·혼합 GPU는 계산 기반.
 - QLoRA는 CPU로 직접 흉내 낼 수 없어 `measure-cpu`는 "LoRA 측정 × 1.3 + 4bit 가중치" 규칙 (8계열 실측 5% 안팎).
 - 처리량은 A100 MIG·T4만 실측 → 측정 안 한 GPU(RTX 3090·4090 등)는 같은 세대(A100) 실측 상수를 쓰고 범위를 ±50%로 넓게 표시.
 - MoE 모델 미지원.
