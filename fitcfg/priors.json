@@ -1,0 +1,41 @@
+{
+  "source": "FakeTensor trace (scripts/trace_sweep.py → scripts/fit_trace_priors.py)",
+  "created": "2026-09-25T15:52:32",
+  "n_rows": 288,
+  "heldout_model_mape": 1.1179904679372088,
+  "cuda_overhead_prior_gb": 1.1,
+  "constants": {
+    "default": {
+      "act_h": 25.5356,
+      "act_i": 6.6818,
+      "ckpt_h": 1.9657,
+      "logit_bytes": 13.6618,
+      "opt_temp": 2.0823,
+      "overhead_gb": 1.272
+    },
+    "full": {
+      "act_h": 26.3269,
+      "act_i": 8.2503,
+      "ckpt_h": 1.4247,
+      "logit_bytes": 13.3135,
+      "opt_temp": 2.0926,
+      "overhead_gb": 1.238
+    },
+    "lora": {
+      "act_h": 25.0363,
+      "act_i": 6.3071,
+      "ckpt_h": 0.8215,
+      "logit_bytes": 13.7442,
+      "opt_temp": 2.0823,
+      "overhead_gb": 1.1
+    },
+    "qlora": {
+      "act_h": 25.8942,
+      "act_i": 6.395,
+      "ckpt_h": 3.7134,
+      "logit_bytes": 13.5032,
+      "opt_temp": 2.0823,
+      "overhead_gb": 1.588
+    }
+  }
+}

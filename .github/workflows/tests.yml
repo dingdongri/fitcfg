@@ -1,0 +1,26 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  core:            # 코어(예측·추천·CLI)는 표준 라이브러리만 — torch 없이 도는지 확인
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest && pip install -e .
+      - run: python -m pytest -q          # torch가 필요한 테스트는 자동으로 건너뜀
+      - run: fitcfg plan --model llama-3.1-8b --gpu rtx4090 --method qlora --top 1
+  hf:              # HF Trainer 플러그인 · CPU 측정 (CPU 전용 torch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install pytest -e ".[hf]"
+      - run: python -m pytest -q

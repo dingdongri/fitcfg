@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+# 측정 결과는 남기되, 대용량 모델/체크포인트는 무시
+*.bin
+*.safetensors
+checkpoints/
+wandb/
+.DS_Store
+# 합성 데이터 산출물 (테스트용)
+data/synthetic_measurements.csv
+data/calibration_synthetic.json
+reports/*synthetic*
+dist/
+build/
+.pytest_cache/
+outputs/
+runs/

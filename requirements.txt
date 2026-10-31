@@ -1,0 +1,10 @@
+# fitcfg — 로컬(노트북/맥)에서 예측·추천·UI를 쓰기 위한 의존성
+# 코어(fitcfg/)는 표준 라이브러리만 사용. 아래는 웹 UI용.
+streamlit>=1.50
+altair>=5
+pandas>=2
+
+# (선택) 보정 리포트 그림 scripts/calibrate.py
+# matplotlib>=3.7
+# (선택) 테스트
+# pytest>=8.0

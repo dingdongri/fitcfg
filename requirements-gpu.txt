@@ -1,0 +1,11 @@
+# GPU 측정 하네스(scripts/measure.py, sweep.py)용 — 학교 서버/Colab에서만 설치.
+# Colab에서는 torch를 재설치하지 말 것(기본 설치본 사용).
+# 실제 사용된 버전은 측정 CSV의 torch/transformers/peft/bitsandbytes 열에 행마다 기록된다.
+torch>=2.3
+transformers>=4.46
+peft>=0.12
+bitsandbytes>=0.43
+accelerate>=0.33
+datasets>=2.20
+# ZeRO/offload 번들을 실행할 때만:
+# deepspeed>=0.14

@@ -1,0 +1,10 @@
+# Colab T4, 2026-10-01 — 생성 번들 실제 실행 (calibration v0.2: seq² 항 없음), alpaca 2,000개, 30 optimizer steps
+qlora_1024_recommended  (micro-batch 2, 누적 8, ckpt off)  ✅ 성공  peak 실측 14.29GB vs 예측 12.36GB (-13.5%)
+qlora_1024_naive        (micro-batch 8, 누적 2, ckpt off)  ❌ OOM   (예측 42.8GB → OOM 예상)
+lora_2048_recommended   (micro-batch 1, 누적 16, ckpt off) ❌ OOM   ← v0.2 식의 결함(seq² 항 누락)
+lora_2048_naive         (micro-batch 8, 누적 2, ckpt off)  ❌ OOM   (예측 82.7GB → OOM 예상)
+
+# 같은 날 — calibration v0.3 (T4 seq² attention 항 추가) 추천 #2 설정 재실행
+qlora_1024_v03          (micro-batch 1, 누적 16, ckpt off) ✅ 성공  peak 실측 8.48GB  vs v0.3 예측 8.24GB (-2.8%)
+lora_2048_v03           (micro-batch 2, 누적 8, ckpt on)   ✅ 성공  peak 실측 11.18GB vs v0.3 예측 11.12GB (-0.5%)  · 처리량 854 tok/s (예측 1,291, 범위 807~2,065)
+# v0.3 예측으로 다시 보면: v0.2 추천 lora_2048 (b1, ckpt off) = 16.14GB → OOM 예상(실제 OOM) · qlora_1024 v0.2 추천 = 14.28GB (실측 14.29)
