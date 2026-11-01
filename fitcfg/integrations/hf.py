@@ -64,6 +64,7 @@ class Prediction:
     margin: float
     breakdown: dict = field(default_factory=dict)
     suggestion: str | None = None
+    warnings: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +196,7 @@ def predict(model, args, gpu: GPUSpec | None = None, seq_len: int | None = None,
     cfg = _model_config_dict(model)
     spec, info = _spec_and_structure(cfg, d.model_name)
     margin = info.margin(d.method)
+    bf16_on_old_gpu = (not g.bf16) and bool(getattr(args, "bf16", False))
     if not g.bf16 and d.dtype == "bf16":
         d.dtype = "fp16"
     tc = TrainConfig(model=d.model_name, method=d.method, gpus=d.gpus, batch_size=d.batch_size, seq_len=d.seq_len,
@@ -212,6 +214,10 @@ def predict(model, args, gpu: GPUSpec | None = None, seq_len: int | None = None,
     p = Prediction(pred_mem_gb=round(pred, 2), cap_gb=round(cap, 2), gpu_mem_gb=g.mem_gb, gpu_label=g.label,
                    fits=pred <= cap, tokens_per_s=round(tps, 1) if tps else None, structure=info.kind,
                    margin=margin, breakdown=mem.as_gb())
+    if bf16_on_old_gpu:
+        # 최신 PyTorch는 bf16 미지원 GPU에서도 bf16을 '에뮬레이션'으로 돌려 준다 → 오류 없이 매우 느려짐
+        # (Kaggle T4 실측: 같은 1B LoRA 설정이 bf16 264 tok/s vs fp16 808 tok/s)
+        p.warnings.append(f"{g.label}은(는) bf16을 하드웨어로 지원하지 않아 약 3배 느려집니다 → TrainingArguments(fp16=True) 권장")
     if not p.fits:
         p.suggestion = _suggest(d, spec, info, g, s)
     return d, p
@@ -309,6 +315,8 @@ class FitcfgCallback(TrainerCallback):
                       + (f" · 구조 {p.structure}, 여유 ×{p.margin:.2f}" if p.margin != 1.0 else ""))
             if d.seq_len_guessed:
                 self._say("seq_len을 몰라 2048로 가정했습니다 → FitcfgCallback(seq_len=...)으로 지정하면 정확해집니다.")
+            for w in p.warnings:
+                self._say("⚠️ " + w)
         if not p.fits:
             msg = (f"OOM 예상: 예측 {p.pred_mem_gb:.1f}GB > 한도 {p.cap_gb:.1f}GB."
                    + (f" 들어가는 추천 설정: {p.suggestion}" if p.suggestion else

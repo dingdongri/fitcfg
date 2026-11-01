@@ -82,3 +82,12 @@ def test_no_gpu_skips_quietly(tmp_path, monkeypatch):
     cb = FitcfgCallback(seq_len=32, verbose=False, calibration=None)
     Trainer(model=_model(), args=_args(tmp_path, max_steps=2), train_dataset=_DS(), callbacks=[cb]).train()
     assert cb.prediction is None and cb.detected is not None
+
+
+def test_bf16_on_gpu_without_bf16_warns(tmp_path):
+    args = TrainingArguments(output_dir=str(tmp_path), per_device_train_batch_size=1, use_cpu=True, report_to=[])
+    args.bf16 = True                                         # 사용자가 T4에서 bf16을 켠 상황
+    _, p = predict(_model(), args, gpu=get_gpu("t4"), seq_len=32)
+    assert any("bf16" in w and "fp16=True" in w for w in p.warnings)
+    _, p2 = predict(_model(), args, gpu=get_gpu("rtx4090"), seq_len=32)
+    assert not p2.warnings

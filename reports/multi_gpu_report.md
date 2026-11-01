@@ -29,3 +29,22 @@
 ## 한계
 - T4 ×2(PCIe) 한 종류. NVLink(A100·H100) 대역폭은 문헌값 100 GB/s, 3D 병렬화(TP·PP)·혼합 GPU는 여전히 계산 기반.
 - ZeRO-3 메모리는 단편화 여유를 크게 잡아 +16% (안전한 쪽). 실측 2건(MIG offload·T4 LoRA)뿐.
+
+## 추가: HF Trainer 플러그인을 GPU 2장(torchrun DDP)에 붙여서 (`scripts/plugin_ddp_check.py`, `data/plugin_runs_ddp.jsonl`)
+
+| 시나리오 | 감지 | 결과 | 예측 GB | 실측 GB | 오차 |
+|---|---|---|---|---|---|
+| 1B LoRA mb2 · GPU 2장 | lora · GPU 2장 | 학습 완료 | 11.15 | 10.85 | +2.7% |
+| 1B LoRA mb2 · GPU 1장 | lora · GPU 1장 | 학습 완료 | 11.14 | 10.64 | +4.7% |
+| 3B QLoRA mb1 · GPU 2장 | qlora · GPU 2장 | 학습 완료 | 8.73 | 8.43 | +3.6% |
+| 1B LoRA mb8 ckpt off · GPU 2장 · strict | lora · GPU 2장 | **학습 전 중단 (2.5초)** | 114.5 | — | — |
+
+- GPU 수·학습 방식·checkpointing을 torchrun 환경에서도 정확히 읽음 (4/4), 메모리 예측 +2.7~+4.7% (안전한 쪽)
+- strict 중단 시 제안한 설정(micro-batch 1 × 누적 32 × GPU 2)은 원래 global batch 64를 그대로 유지
+- **발견 → 플러그인 기능 추가**: 테스트 스크립트가 T4에서 bf16을 켰는데(최신 PyTorch는 구형 GPU에서도 bf16을
+  '에뮬레이션'으로 허용) 오류 없이 약 3배 느려짐 (같은 설정 fp16 번들 808 tok/s vs bf16 264 tok/s). 사용자도 쉽게 하는 실수라
+  플러그인이 bf16 미지원 GPU에서 bf16을 켜면 "fp16=True 권장" 경고를 내도록 함. (GPU 2장 / 1장 속도비는 1.98배로 확장 결과와 일치)
+
+## 추가: T4 처리량 재보정 검토
+- Kaggle 1B LoRA(seq 2048)가 +14% 높게 예측된 건 Colab에서 잰 같은 GPU·같은 설정(865 tok/s)보다 Kaggle(808)이 7% 느린 환경 차이가 절반
+- Kaggle 데이터를 넣어 다시 맞춰도 13.8% → 12.3%로 거의 그대로 → 보정값은 유지하고 "같은 GPU라도 환경에 따라 ±7%"를 한계로 기록
